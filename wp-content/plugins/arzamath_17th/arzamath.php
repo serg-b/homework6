@@ -66,9 +66,9 @@ function test_function($post){
         'posts_per_page' => -1
     ));
 
+
     if ($posts->post_count>0) {
         $post_meta = get_post_meta($post->ID, 'display_on', true);
-        //var_dump($post_meta);
         $post_meta = unserialize($post_meta);
 
         foreach($posts->posts as $post) {
@@ -79,8 +79,10 @@ function test_function($post){
                        name='display_on[]' <?php echo ($is_checked) ? 'checked' : '' ?>/>
                 <?php echo $post->post_title ?>
             </p>
-        <?php }
-    }
+
+        <?php } ?>
+        <input type="button" id="savedata" name="Save" value="Save"/>
+    <?php }
 }
 
 add_action('save_post', 'save_display_on');
@@ -89,12 +91,15 @@ function save_display_on($post_id) {
         return;
     }
 
-    //var_dump($_POST);
-    //die;
 
     if (!empty($_POST['display_on'])) {
         $data4save = serialize($_POST['display_on']);
-        update_post_meta($post_id, 'display_on', $data4save);
+
+    // Add or Update the meta field in the database.
+        if ( !update_post_meta($post_id, 'display_on', $data4save) ) {
+            add_post_meta($post_id, 'display_on', $data4save, true );
+        }
+
     }
 }
 
@@ -106,45 +111,137 @@ if (!is_admin()) {
     add_action( 'wp_enqueue_scripts', 'theme_name_scripts' );
 }
 
-function echo_slider(){
-        global $post;
-        $slides = new WP_Query(array(
-            'post_status' => 'publish',
-            'post_type' => 'slide',
-            'posts_per_page' => -1
-        ));
 
-        if ($slides->post_count > 0) {
-            foreach ($slides->posts as $id) {
-                $post_meta = get_post_meta($id->ID, 'display_on', true);
-                //var_dump($post_meta);
-                $post_meta = unserialize($post_meta);
+
+
+function echo_slider(){
+    global $post;
+    $slides = new WP_Query(array(
+        'post_status' => 'publish',
+        'post_type' => 'slide',
+        'posts_per_page' => -1
+    ));
+    $current_page_id = $post->ID;
+    $flag_slide_exist = false;
+    if ($slides->post_count > 0) {
+        foreach ($slides->posts as $id) {
+            $post_meta = get_post_meta($id->ID, 'display_on', true);
+            $post_meta = unserialize($post_meta);
+            if ( in_array($current_page_id, $post_meta) ) {
+                $flag_slide_exist = true;
             }
         }
-        $id_check = in_array($post->ID, $post_meta);
-        if ($id_check) {
-            ?>
-            <div class="jcarousel">
-                <ul>
-                    <?php while ($slides->have_posts()) {
-                        $slides->the_post(); ?>
-                        <li>
-                            <?php the_post_thumbnail('full'); ?>
-                        </li>
-                    <?php } ?>
-                </ul>
-            </div>
-            <script src="/wp-content/plugins/arzamath_17th/js/jquery.jcarousel.min.js" s></script>
-            <script>
-                jQuery(document).ready(function() {
-                    jQuery('.jcarousel').jcarousel({
-                        wrap: 'circular',
-                        animation: '<?php echo get_option('fading'); ?>'
-                    }).jcarouselAutoscroll({
-                        interval: '<?php echo get_option('interval'); ?>',
-                        autostart: true
-                    });
+    }
+
+    if ($flag_slide_exist) :
+        ?>
+        <div class="jcarousel">
+            <ul>
+                <?php
+
+                    while ($slides->have_posts()) {
+                    $slides->the_post();
+                        $post_meta = get_post_meta($post->ID, 'display_on', true);
+                        $post_meta = unserialize($post_meta);
+                        if ( in_array($current_page_id, $post_meta) ) :
+                        ?>
+                    <li>
+                        <?php the_post_thumbnail('full'); ?>
+                    </li>
+                <?php endif; } ?>
+            </ul>
+        </div>
+        <script src="/wp-content/plugins/arzamath_17th/js/jquery.jcarousel.min.js"></script>
+        <script>
+            jQuery(document).ready(function() {
+                jQuery('.jcarousel').jcarousel({
+                    wrap: 'circular',
+                    animation: '<?php echo get_option('fading'); ?>'
+                }).jcarouselAutoscroll({
+                    interval: '<?php echo get_option('interval'); ?>',
+                    autostart: true
                 });
-            </script>
-        <?php }
+            });
+        </script>
+    <?php endif;
+}
+
+//AJAX
+
+add_action( 'admin_footer', 'my_action_javascript' ); // Write our JS below here
+
+function my_action_javascript() { ?>
+    <script type="text/javascript" >
+        jQuery(document).ready(function($) {
+            $('#savedata').click(function(e) {
+                e.preventDefault();
+                var data_field = [];
+                var data_object = {};
+
+
+                $('.inside input[type="checkbox"]:checked').each(function(i) {
+                    data_field.push(
+                        $(this).val()
+                        );
+                    }
+                );
+
+                data_object.data_field = data_field;
+                data_object.post_id = $('#post_ID').val();
+                var data = {
+                    'action': 'my_action',
+                    'data': data_object
+                };
+
+                $.post(ajaxurl, data, function(response) {
+                    alert(response);
+                })
+
+            });
+
+            // since 2.8 ajaxurl is always defined in the admin header and points to admin-ajax.php
+
+        });
+    </script> <?php
+}
+
+
+add_action( 'wp_ajax_my_action', 'my_action_callback' );
+
+function my_action_callback() {
+    global $wpdb; // this is how you get access to the database
+
+    $data_object = ($_POST['data']);
+    $data_field = serialize( $data_object['data_field'] );
+
+
+    if (!empty($data_object)) {
+
+        if (wp_is_post_revision($data_object['post_id'])) {
+            return "some";
+        }
+
+
+            // Add or Update the meta field in the database.
+            $flag = false;
+            $flag = update_post_meta($data_object['post_id'], 'display_on' , $data_field);
+            if ( !$flag ) {
+                $flag = add_post_meta($data_object['post_id'], 'display_on' , $data_field, true );
+            }
+            else {
+                $flag = true;
+            }
+
+      // }
+
+    }
+    if ($flag){
+        echo "Your data has been successfully saved";
+    }
+    else {
+        echo "It was en error while saving your data";
+    }
+
+
+    die(); // this is required to terminate immediately and return a proper response
 }
