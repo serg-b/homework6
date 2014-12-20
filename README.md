@@ -1,1 +1,1 @@
-HOMEWORK 4, Creating plugin
+HOMEWORK 6, AJAX
